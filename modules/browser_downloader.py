@@ -10,7 +10,7 @@ from urllib.parse import urlparse, unquote
 import mimetypes
 import aiofiles
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from playwright_stealth import stealth_async
+from playwright_stealth import Stealth
 from tqdm.asyncio import tqdm
 
 from .wayback_api import WaybackAPI
@@ -100,7 +100,7 @@ class BrowserDownloader:
         self.context = await self.browser.new_context(**context_options)
         
         # Apply stealth to context
-        await stealth_async(self.context)
+        await Stealth().apply_stealth_async(self.context)
         
         # Set cookies to appear more legitimate
         await self.context.add_cookies([
