@@ -1,0 +1,56 @@
+# Django
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.log
+
+# Django specific
+db.sqlite3
+*.sqlite3
+media/
+staticfiles/
+local_settings.py
+
+# Environment variables
+.env
+
+# VSCode
+.vscode/
+
+# Python virtualenv
+venv/
+ENV/
+env/
+.venv/
+.Python
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Migrations
+*/migrations/__pycache__/
+*/migrations/*.pyc
+*/migrations/*.pyo
+
+# Test output
+htmlcov/
+.coverage
+.tox/
+.nox/
+.pytest_cache/
+.cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+.pyre/
