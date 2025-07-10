@@ -49,7 +49,7 @@ python wbdownloader.py -f http://example.com -s 20240417160532
 
 Download a website with specific snapshot:
 ```bash
-python wbdownloader.py -f http://akademiberbagi.org -s 20240417160532
+python wbdownloader.py -f http://example.com -s 20240417160532
 ```
 
 Specify output directory:
