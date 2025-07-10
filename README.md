@@ -8,6 +8,8 @@ A Python CLI tool to download websites from the Internet Archive's Wayback Machi
 - Multi-level crawling: follow links to download entire site sections
 - Preserve original directory structure
 - Download all assets: HTML, CSS, JavaScript, images, fonts, etc.
+- **Two download modes**: HTTP client (fast) and Browser mode (more reliable)
+- **Browser mode**: Uses Playwright for better bot detection avoidance
 - Concurrent downloads for faster performance
 - Progress tracking with visual progress bars
 - Handles complex Wayback Machine URLs
@@ -17,6 +19,7 @@ A Python CLI tool to download websites from the Internet Archive's Wayback Machi
 - Page-by-page asset downloading to reduce memory usage and server load
 - Resume capability - skips already downloaded files
 - Proxy support for bypassing IP restrictions and rate limits
+- **Anti-bot detection**: Random delays, realistic headers, human-like behavior simulation
 
 ## Installation
 
@@ -26,6 +29,14 @@ A Python CLI tool to download websites from the Internet Archive's Wayback Machi
 ```bash
 pip install -r requirements.txt
 ```
+
+3. **For browser mode** (recommended for sites with bot detection):
+
+```bash
+python setup_browser.py
+```
+
+This will install Playwright browsers needed for browser mode.
 
 ## Usage
 
@@ -39,11 +50,14 @@ python wbdownloader.py -f http://example.com -s 20240417160532
 - `-f, --url` (required): URL to download from Wayback Machine
 - `-s, --snapshot` (required): Snapshot timestamp in YYYYMMDDHHMMSS format
 - `-o, --output`: Output directory (defaults to domain name)
-- `-c, --concurrent`: Number of concurrent downloads (default: 3)
+- `-c, --concurrent`: Number of concurrent downloads (default: 1)
 - `-l, --level`: Depth of links to follow (default: 1, main page only)
 - `-p, --proxy`: Proxy URL for downloads (e.g., http://proxy.example.com:8080)
 - `-v, --verbose`: Enable verbose logging
 - `--no-assets`: Download only HTML without assets
+- `--sequential-assets`: Download assets sequentially (slower but less detectable)
+- `--browser`: Use browser mode for better bot detection avoidance
+- `--headless`: Run browser in headless mode (only with --browser)
 
 ### Examples
 
@@ -91,6 +105,21 @@ python wbdownloader.py -f http://example.com -s 20240417160532 -p http://user:pa
 
 # Proxy with multi-level download
 python wbdownloader.py -f http://example.com -s 20240417160532 -l 2 -p http://proxy.example.com:8080
+```
+
+Use browser mode for better bot detection avoidance:
+```bash
+# Browser mode (recommended for sites with bot detection)
+python wbdownloader.py -f http://example.com -s 20240417160532 --browser
+
+# Browser mode with headless option (faster but more detectable)
+python wbdownloader.py -f http://example.com -s 20240417160532 --browser --headless
+
+# Browser mode with sequential assets (slowest but most reliable)
+python wbdownloader.py -f http://example.com -s 20240417160532 --browser --sequential-assets
+
+# Browser mode with proxy
+python wbdownloader.py -f http://example.com -s 20240417160532 --browser -p http://proxy.example.com:8080
 ```
 
 ## Output Structure
@@ -149,11 +178,126 @@ The tool supports HTTP and HTTPS proxies for bypassing IP restrictions or rate l
 - Python 3.7+
 - Dependencies listed in requirements.txt
 
+## Download Modes
+
+### HTTP Mode (Default)
+- **Fast**: Uses HTTP client for downloads
+- **Lightweight**: Lower resource usage
+- **Good for**: Simple sites without bot detection
+- **Limitations**: May be detected as a bot on some sites
+
+### Browser Mode (Recommended for problematic sites)
+- **Reliable**: Uses real browser engine (Playwright)
+- **Stealth**: Advanced bot detection avoidance
+- **JavaScript**: Handles dynamic content and JavaScript
+- **Realistic**: Simulates human browsing behavior
+- **Limitations**: Slower and uses more resources
+
+### When to Use Browser Mode
+- When HTTP mode gets "Connection closed" errors
+- Sites with aggressive bot detection
+- Sites that require JavaScript to load content
+- When you need maximum reliability
+
 ## Limitations
 
 - Respects Wayback Machine rate limits
-- Some dynamic content loaded by JavaScript may not be captured
+- Browser mode is slower but more reliable
+- Some dynamic content loaded by JavaScript may not be captured (HTTP mode)
 - Very large websites may take considerable time to download
+
+## Changelog
+
+### Version 2.0.0 - Bot Detection Avoidance Update
+
+#### **Major Features Added**
+
+**Browser Mode Implementation**
+- ✅ Added Playwright-based browser downloader for better bot detection avoidance
+- ✅ Implemented playwright-stealth for advanced anti-detection capabilities
+- ✅ Added `--browser` flag to enable browser mode
+- ✅ Added `--headless` flag for headless browser operation
+
+**Anti-Bot Detection Features**
+- ✅ Realistic User-Agent rotation from 6 popular browsers
+- ✅ Browser-like headers (Accept, Accept-Language, Accept-Encoding, DNT, Sec-Fetch, etc.)
+- ✅ Human-like behavior simulation (mouse movements, scrolling, random pauses)
+- ✅ Smart delay system (1-3 seconds between requests, longer pauses every 5 requests)
+- ✅ Cookie jar and session persistence
+- ✅ Connection pooling with realistic limits
+
+**Performance & Safety Improvements**
+- ✅ Changed default concurrent downloads from 3 to 1 (reduces bot detection)
+- ✅ Added `--sequential-assets` flag for maximum stealth mode
+- ✅ Improved retry logic with exponential backoff and jitter
+- ✅ Extended timeouts (60 seconds total, 30 seconds connect)
+- ✅ Enhanced error handling for connection issues
+
+#### 🔧 **Technical Improvements**
+
+**HTTP Mode Enhancements**
+- ✅ Better User-Agent rotation with realistic browser strings
+- ✅ Improved request delays (0.5-2 seconds, up to 5 seconds every 10 requests)
+- ✅ Enhanced retry mechanism (increased from 3 to 5 retries)
+- ✅ More realistic headers and connection settings
+
+**Code Structure**
+- ✅ Created separate `BrowserDownloader` class for browser-based downloads
+- ✅ Extracted HTTP download logic into `download_with_http()` function
+- ✅ Added `setup_browser.py` script for easy Playwright installation
+- ✅ Modular design allowing both HTTP and browser modes
+
+#### 📦 **New Dependencies**
+- ✅ Added `playwright>=1.40.0` for browser automation
+- ✅ Added `playwright-stealth>=1.0.6` for bot detection avoidance
+
+#### 🚀 **Usage Examples**
+
+**For sites with bot detection (recommended):**
+```bash
+python wbdownloader.py -f https://example.com -s 20240417160532 --browser
+```
+
+**Maximum stealth mode:**
+```bash
+python wbdownloader.py -f https://example.com -s 20240417160532 --browser --sequential-assets
+```
+
+**With proxy support:**
+```bash
+python wbdownloader.py -f https://example.com -s 20240417160532 --browser -p http://proxy.example.com:8080
+```
+
+#### 🛠️ **Setup Instructions**
+
+1. Install new dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+2. Setup browser mode (one-time):
+```bash
+python setup_browser.py
+```
+
+#### 🎯 **Problem Solved**
+
+This update specifically addresses the "Connection closed" error that occurs when the Wayback Machine detects and blocks bot traffic. The new browser mode uses a real Chrome browser engine that's much harder to detect, providing:
+
+- **Higher success rate** for problematic sites
+- **Better reliability** against bot detection systems
+- **JavaScript support** for dynamic content
+- **Human-like behavior** that mimics real user interactions
+
+#### 📊 **Performance Comparison**
+
+| Mode | Speed | Detection Risk | Resource Usage | Recommended For |
+|------|-------|----------------|----------------|-----------------|
+| HTTP | Fast | High | Low | Simple sites |
+| Browser | Slow | Low | High | Sites with bot detection |
+| Browser + Sequential | Slowest | Very Low | High | Maximum stealth |
+
+---
 
 ## License
 

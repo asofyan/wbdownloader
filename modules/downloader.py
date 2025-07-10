@@ -11,6 +11,8 @@ import mimetypes
 from tqdm.asyncio import tqdm
 import time
 import random
+from datetime import datetime
+import platform
 
 from .wayback_api import WaybackAPI
 
@@ -18,7 +20,17 @@ from .wayback_api import WaybackAPI
 class AsyncDownloader:
     """Handle asynchronous file downloads"""
     
-    def __init__(self, output_dir, max_concurrent=5, logger=None, proxy=None):
+    # List of realistic user agents to rotate through
+    USER_AGENTS = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0'
+    ]
+    
+    def __init__(self, output_dir, max_concurrent=1, logger=None, proxy=None):
         self.output_dir = Path(output_dir)
         self.max_concurrent = max_concurrent
         self.logger = logger
@@ -31,21 +43,53 @@ class AsyncDownloader:
         self.downloaded = 0
         self.failed = 0
         self.skipped = 0
+        
+        # Request tracking for delay management
+        self.last_request_time = 0
+        self.request_count = 0
     
     async def __aenter__(self):
         """Async context manager entry"""
-        timeout = aiohttp.ClientTimeout(total=30)
+        timeout = aiohttp.ClientTimeout(total=60, connect=30, sock_read=30)
         
         # Log proxy usage
         if self.proxy:
             if self.logger:
                 self.logger.info(f"Using proxy: {self.proxy}")
         
+        # Select a random user agent
+        user_agent = random.choice(self.USER_AGENTS)
+        
+        # Build browser-like headers
+        headers = {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0'
+        }
+        
+        # Configure connection pooling and SSL
+        connector = aiohttp.TCPConnector(
+            limit=100,  # Total connection pool limit
+            limit_per_host=30,  # Per-host connection limit
+            ttl_dns_cache=300,  # DNS cache timeout
+            enable_cleanup_closed=True
+        )
+        
+        # Create session with cookie jar
         self.session = aiohttp.ClientSession(
             timeout=timeout,
-            headers={
-                'User-Agent': 'Mozilla/5.0 (compatible; WaybackDownloader/1.0)'
-            }
+            headers=headers,
+            connector=connector,
+            cookie_jar=aiohttp.CookieJar()
         )
         return self
     
@@ -53,6 +97,35 @@ class AsyncDownloader:
         """Async context manager exit"""
         if self.session:
             await self.session.close()
+    
+    async def _apply_request_delay(self):
+        """Apply smart delay between requests to avoid bot detection"""
+        current_time = time.time()
+        self.request_count += 1
+        
+        # Base delay range (0.5 to 2 seconds)
+        min_delay = 0.5
+        max_delay = 2.0
+        
+        # Every 10 requests, add a longer pause
+        if self.request_count % 10 == 0:
+            min_delay = 2.0
+            max_delay = 5.0
+            if self.logger:
+                self.logger.debug(f"Applied longer pause after {self.request_count} requests")
+        
+        # Calculate time since last request
+        time_since_last = current_time - self.last_request_time
+        
+        # Generate random delay
+        target_delay = random.uniform(min_delay, max_delay)
+        
+        # Only sleep if we haven't waited long enough
+        if time_since_last < target_delay:
+            sleep_time = target_delay - time_since_last
+            await asyncio.sleep(sleep_time)
+        
+        self.last_request_time = time.time()
     
     async def download_file(self, wayback_url, original_url, is_main=False, save=True, force_download=False):
         """
@@ -92,17 +165,28 @@ class AsyncDownloader:
                         # Continue with download if reading fails
             
             async with self.semaphore:
+                # Apply delay before request
+                await self._apply_request_delay()
+                
                 # Retry logic for rate limiting and network errors
-                max_retries = 3
-                base_delay = 1.0
+                max_retries = 5
+                base_delay = 2.0
                 
                 for attempt in range(max_retries + 1):
                     try:
-                        async with self.session.get(wayback_url, proxy=self.proxy) as response:
+                        # Rotate user agent for each retry
+                        headers = {'User-Agent': random.choice(self.USER_AGENTS)}
+                        
+                        # Add referer header to look more natural
+                        if not is_main:
+                            headers['Referer'] = 'https://web.archive.org/'
+                        
+                        async with self.session.get(wayback_url, proxy=self.proxy, headers=headers) as response:
                             if response.status == 429:
-                                # Rate limited - wait and retry
+                                # Rate limited - wait and retry with exponential backoff
                                 if attempt < max_retries:
-                                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                                    # Exponential backoff with jitter
+                                    delay = base_delay * (2 ** attempt) + random.uniform(0, 3)
                                     if self.logger:
                                         self.logger.warning(f"Rate limited (429), retrying in {delay:.1f}s: {wayback_url}")
                                     await asyncio.sleep(delay)
@@ -124,7 +208,8 @@ class AsyncDownloader:
                     
                     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                         if attempt < max_retries:
-                            delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                            # Exponential backoff with jitter
+                            delay = base_delay * (2 ** attempt) + random.uniform(0, 3)
                             if self.logger:
                                 # Check if it's a proxy-related error
                                 error_msg = str(e).lower()
@@ -189,12 +274,13 @@ class AsyncDownloader:
             self.failed += 1
             return None, None
     
-    async def download_assets(self, assets):
+    async def download_assets(self, assets, sequential=False):
         """
-        Download multiple assets concurrently
+        Download multiple assets concurrently or sequentially
         
         Args:
             assets: List of asset dictionaries
+            sequential: If True, download assets one by one
         """
         # Filter out None assets
         valid_assets = [a for a in assets if a is not None]
@@ -206,18 +292,27 @@ class AsyncDownloader:
             unit="files"
         )
         
-        # Create download tasks
-        tasks = []
-        for asset in valid_assets:
-            task = self._download_asset_with_progress(
-                asset['wayback_url'],
-                asset['original_url'],
-                progress_bar
-            )
-            tasks.append(task)
-        
-        # Execute downloads
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if sequential:
+            # Download assets sequentially
+            for asset in valid_assets:
+                await self._download_asset_with_progress(
+                    asset['wayback_url'],
+                    asset['original_url'],
+                    progress_bar
+                )
+        else:
+            # Create download tasks for concurrent execution
+            tasks = []
+            for asset in valid_assets:
+                task = self._download_asset_with_progress(
+                    asset['wayback_url'],
+                    asset['original_url'],
+                    progress_bar
+                )
+                tasks.append(task)
+            
+            # Execute downloads concurrently
+            await asyncio.gather(*tasks, return_exceptions=True)
         
         progress_bar.close()
         
@@ -232,8 +327,7 @@ class AsyncDownloader:
         """Download asset and update progress bar"""
         try:
             await self.download_file(wayback_url, original_url)
-            # Small delay to be respectful to the server
-            await asyncio.sleep(0.1)
+            # Delay is now handled inside download_file method
         except Exception as e:
             if self.logger:
                 self.logger.debug(f"Failed to download {wayback_url}: {str(e)}")
